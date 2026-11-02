@@ -161,16 +161,16 @@ def check_merge(left: pd.DataFrame, right: pd.DataFrame, on, value_col: str, how
 def _find_matching_key(
     df1: pd.DataFrame, df2: pd.DataFrame, candidate_names: list[str]
 ) -> tuple[str | None, str | None]:
-  """Finds the matching key column between two dataframes regardless of casing or delimiters."""
+  """Finds matching key columns between two tables regardless of casing, BOM, or whitespace."""
 
   def normalize(s: str) -> str:
-      return (
-          s.lower()
-          .replace("\ufeff", "")
-          .replace(" ", "")
-          .replace("_", "")
-          .replace("-", "")
-      )
+    return (
+        s.lower()
+        .replace("\ufeff", "")
+        .replace(" ", "")
+        .replace("_", "")
+        .replace("-", "")
+    )
 
   map1 = {normalize(c): c for c in df1.columns}
   map2 = {normalize(c): c for c in df2.columns}
@@ -192,9 +192,9 @@ def prepare_epresso_data(
   """
   reports = []
 
-  # Clean BOM (\ufeff), whitespace, and hidden quotes across all table column names
-    for df in (df_sales, df_products, df_stores):
-      df.columns = [c.strip().lstrip("\ufeff") for c in df.columns]
+  # Clean BOM (\ufeff), whitespace, and hidden quotes across column headers
+  for df in (df_sales, df_products, df_stores):
+    df.columns = [c.strip().lstrip("\ufeff") for c in df.columns]
 
   # 1. Date parsing: extract Year and Month
   date_col = next((c for c in df_sales.columns if c.lower() == "date"), None)
@@ -224,11 +224,9 @@ def prepare_epresso_data(
         f" {list(df_products.columns)}"
     )
 
-  # Ensure string matching
   df_sales[sales_prod_key] = df_sales[sales_prod_key].astype(str).str.strip()
   df_products[prod_key] = df_products[prod_key].astype(str).str.strip()
 
-  # Rename dim key to match sales key if they differ slightly
   if sales_prod_key != prod_key:
     df_products = df_products.rename(columns={prod_key: sales_prod_key})
     prod_key = sales_prod_key
