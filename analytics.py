@@ -156,3 +156,63 @@ def check_merge(left: pd.DataFrame, right: pd.DataFrame, on, value_col: str, how
                     'of both tables before using this result.') if fan_out else '',
     }
     return merged, report
+
+# --------------------------------------------------- data prep & join pipeline
+def prepare_epresso_data(
+    df_sales: pd.DataFrame, df_products: pd.DataFrame, df_stores: pd.DataFrame
+) -> tuple[pd.DataFrame, list[dict]]:
+  """Standardizes keys, prepares date dimensions, and joins dimensions onto Sales Fact
+
+  using check_merge to audit row counts and revenue totals.
+  """
+  reports = []
+
+  # 1. Clean join keys to avoid whitespace or casing mismatches
+  for df in (df_sales, df_products, df_stores):
+    for col in (
+        "Store ID",
+        "Product ID",
+        "Category ID",
+        "store_id",
+        "product_id",
+    ):
+      if col in df.columns:
+        df[col] = df[col].astype(str).str.strip()
+
+  # 2. Date parsing: extract Year and Month
+  date_col = next((c for c in df_sales.columns if c.lower() == "date"), None)
+  if date_col:
+    df_sales[date_col] = pd.to_datetime(df_sales[date_col])
+    df_sales["Year"] = df_sales[date_col].dt.year
+    df_sales["Month"] = df_sales[date_col].dt.strftime("%Y-%m")
+
+  # Detect exact column name for Revenue (e.g. 'Revenue' vs 'revenue')
+  rev_col = next(
+      (c for c in df_sales.columns if c.lower() == "revenue"), "Revenue"
+  )
+
+  # 3. Merge 1: Sales Fact + Products Dim on Product ID
+  prod_key = "Product ID" if "Product ID" in df_sales.columns else "product_id"
+  merged_1, report_1 = check_merge(
+      left=df_sales,
+      right=df_products,
+      on=prod_key,
+      value_col=rev_col,
+      how="left",
+  )
+  report_1["step"] = "Sales Fact + Products Dim"
+  reports.append(report_1)
+
+  # 4. Merge 2: Result + Stores Dim on Store ID
+  store_key = "Store ID" if "Store ID" in merged_1.columns else "store_id"
+  final_df, report_2 = check_merge(
+      left=merged_1,
+      right=df_stores,
+      on=store_key,
+      value_col=rev_col,
+      how="left",
+  )
+  report_2["step"] = "Sales/Products + Stores Dim"
+  reports.append(report_2)
+
+  return final_df, reports
