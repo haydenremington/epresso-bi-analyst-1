@@ -158,6 +158,25 @@ def check_merge(left: pd.DataFrame, right: pd.DataFrame, on, value_col: str, how
     return merged, report
 
 # --------------------------------------------------- data prep & join pipeline
+def _find_matching_key(
+    df1: pd.DataFrame, df2: pd.DataFrame, candidate_names: list[str]
+) -> tuple[str | None, str | None]:
+  """Finds the matching key column between two dataframes regardless of casing or delimiters."""
+
+  def normalize(s: str) -> str:
+    return s.lower().replace(" ", "").replace("_", "").replace("-", "")
+
+  map1 = {normalize(c): c for c in df1.columns}
+  map2 = {normalize(c): c for c in df2.columns}
+
+  for cand in candidate_names:
+    norm_cand = normalize(cand)
+    if norm_cand in map1 and norm_cand in map2:
+      return map1[norm_cand], map2[norm_cand]
+
+  return None, None
+
+
 def prepare_epresso_data(
     df_sales: pd.DataFrame, df_products: pd.DataFrame, df_stores: pd.DataFrame
 ) -> tuple[pd.DataFrame, list[dict]]:
@@ -167,52 +186,90 @@ def prepare_epresso_data(
   """
   reports = []
 
-  # 1. Clean join keys to avoid whitespace or casing mismatches
+  # Clean whitespace across all string columns
   for df in (df_sales, df_products, df_stores):
-    for col in (
-        "Store ID",
-        "Product ID",
-        "Category ID",
-        "store_id",
-        "product_id",
-    ):
-      if col in df.columns:
-        df[col] = df[col].astype(str).str.strip()
+    df.columns = [c.strip() for c in df.columns]
 
-  # 2. Date parsing: extract Year and Month
+  # 1. Date parsing: extract Year and Month
   date_col = next((c for c in df_sales.columns if c.lower() == "date"), None)
   if date_col:
     df_sales[date_col] = pd.to_datetime(df_sales[date_col])
     df_sales["Year"] = df_sales[date_col].dt.year
     df_sales["Month"] = df_sales[date_col].dt.strftime("%Y-%m")
 
-  # Detect exact column name for Revenue (e.g. 'Revenue' vs 'revenue')
+  # Detect exact column name for Revenue
   rev_col = next(
       (c for c in df_sales.columns if c.lower() == "revenue"), "Revenue"
   )
+  if rev_col not in df_sales.columns:
+    raise ValueError(
+        f"Sales table missing Revenue column. Found: {list(df_sales.columns)}"
+    )
 
-  # 3. Merge 1: Sales Fact + Products Dim on Product ID
-  prod_key = "Product ID" if "Product ID" in df_sales.columns else "product_id"
+  # 2. Match and merge Products Dim
+  sales_prod_key, prod_key = _find_matching_key(
+      df_sales, df_products, ["Product ID", "ProductID", "Product_ID", "Product"]
+  )
+
+  if not sales_prod_key or not prod_key:
+    raise KeyError(
+        "Could not find matching Product key. Sales columns:"
+        f" {list(df_sales.columns)}, Products columns:"
+        f" {list(df_products.columns)}"
+    )
+
+  # Ensure string matching
+  df_sales[sales_prod_key] = df_sales[sales_prod_key].astype(str).str.strip()
+  df_products[prod_key] = df_products[prod_key].astype(str).str.strip()
+
+  # Rename dim key to match sales key if they differ slightly
+  if sales_prod_key != prod_key:
+    df_products = df_products.rename(columns={prod_key: sales_prod_key})
+    prod_key = sales_prod_key
+
   merged_1, report_1 = check_merge(
       left=df_sales,
       right=df_products,
-      on=prod_key,
+      on=sales_prod_key,
       value_col=rev_col,
       how="left",
   )
-  report_1["step"] = "Sales Fact + Products Dim"
+  report_1["step"] = (
+      f"Sales Fact + Products Dim (on {sales_prod_key} -> {prod_key})"
+  )
   reports.append(report_1)
 
-  # 4. Merge 2: Result + Stores Dim on Store ID
-  store_key = "Store ID" if "Store ID" in merged_1.columns else "store_id"
+  # 3. Match and merge Stores Dim
+  sales_store_key, store_key = _find_matching_key(
+      merged_1, df_stores, ["Store ID", "StoreID", "Store_ID", "Store"]
+  )
+
+  if not sales_store_key or not store_key:
+    raise KeyError(
+        "Could not find matching Store key. Sales columns:"
+        f" {list(merged_1.columns)}, Stores columns:"
+        f" {list(df_stores.columns)}"
+    )
+
+  merged_1[sales_store_key] = (
+      merged_1[sales_store_key].astype(str).str.strip()
+  )
+  df_stores[store_key] = df_stores[store_key].astype(str).str.strip()
+
+  if sales_store_key != store_key:
+    df_stores = df_stores.rename(columns={store_key: sales_store_key})
+    store_key = sales_store_key
+
   final_df, report_2 = check_merge(
       left=merged_1,
       right=df_stores,
-      on=store_key,
+      on=sales_store_key,
       value_col=rev_col,
       how="left",
   )
-  report_2["step"] = "Sales/Products + Stores Dim"
+  report_2["step"] = (
+      f"Sales/Products + Stores Dim (on {sales_store_key} -> {store_key})"
+  )
   reports.append(report_2)
 
   return final_df, reports
