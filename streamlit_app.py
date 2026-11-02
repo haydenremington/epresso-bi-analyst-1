@@ -210,7 +210,61 @@ else:
   st.info("Location/City column not found.")
 
 st.divider()
+# ---------------------------------------------------------
+# Monthly Revenue Pattern Validation Matrix
+# ---------------------------------------------------------
+with st.expander("📅 Monthly Revenue Pattern & Seasonality Matrix"):
+  st.markdown(
+      "Reconciliation grid verifying the 12-month by 5-year pattern against"
+      " Power BI."
+  )
 
+  # Ensure date column exists and extract numerical month and month name
+  date_col = next((c for c in df_raw.columns if c.lower() == "date"), "Date")
+  df_matrix = df_raw.copy()
+  df_matrix[date_col] = pd.to_datetime(df_matrix[date_col])
+
+  df_matrix["Month_Num"] = df_matrix[date_col].dt.month
+  df_matrix["Month_Name"] = df_matrix[date_col].dt.strftime("%B")
+  df_matrix["Year_Val"] = df_matrix[date_col].dt.year
+
+  # Create pivot matrix: Months on rows, Years on columns
+  pivot_monthly = df_matrix.pivot_table(
+      index=["Month_Num", "Month_Name"],
+      columns="Year_Val",
+      values="Revenue",
+      aggfunc="sum",
+  ).fillna(0)
+
+  # Add Total Column across all 5 years
+  pivot_monthly["5-Year Total"] = pivot_monthly.sum(axis=1)
+
+  # Reset index and drop numerical sort column for clean display
+  display_matrix = pivot_monthly.reset_index()
+  display_matrix = display_matrix.drop(columns=["Month_Num"]).rename(
+      columns={"Month_Name": "Month"}
+  )
+
+  # Format numbers as currency
+  formatted_matrix = display_matrix.copy()
+  for col in formatted_matrix.columns:
+    if col != "Month":
+      formatted_matrix[col] = formatted_matrix[col].apply(
+          lambda x: f"${x:,.2f}"
+      )
+
+  # Render interactive table
+  st.dataframe(formatted_matrix, use_container_width=True, hide_index=True)
+
+  # Anchor Metric Verification Cards
+  december_total = pivot_monthly.loc[
+      (12, slice(None)), "5-Year Total"
+  ].values[0]
+  february_total = pivot_monthly.loc[(2, slice(None)), "5-Year Total"].values[0]
+
+  v_col1, v_col2 = st.columns(2)
+  v_col1.metric("December 5-Year Peak", f"${december_total:,.2f}")
+  v_col2.metric("February 5-Year Trough", f"${february_total:,.2f}")
 # ---------------------------------------------------------
 # Merge Audit Trail
 # ---------------------------------------------------------
