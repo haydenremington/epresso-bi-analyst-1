@@ -265,6 +265,53 @@ with st.expander("📅 Monthly Revenue Pattern & Seasonality Matrix"):
   v_col1, v_col2 = st.columns(2)
   v_col1.metric("December 5-Year Peak", f"${december_total:,.2f}")
   v_col2.metric("February 5-Year Trough", f"${february_total:,.2f}")
+
+# ---------------------------------------------------------
+# Additional Measure Validation: Top Selling Product
+# ---------------------------------------------------------
+with st.expander("🏆 Additional Measure: Top Selling Product Audit"):
+  st.markdown(
+      "Validation of product-level revenue rankings against Power BI."
+  )
+
+  # Identify Product column
+  prod_col = next(
+      (c for c in df_raw.columns if c.lower() in ["product", "product_name"]),
+      "Product",
+  )
+
+  # Calculate revenue grouped by product using analytics.group_total
+  prod_tool_res = analytics.group_total(
+      df_raw, value_col="Revenue", group_col=prod_col
+  )
+
+  if prod_tool_res.error:
+    st.error(f"Product grouping error: {prod_tool_res.error}")
+  else:
+    # Sort dictionary descending by revenue
+    sorted_prods = sorted(
+        prod_tool_res.value.items(), key=lambda item: item[1], reverse=True
+    )
+    df_top_prods = pd.DataFrame(sorted_prods, columns=["Product", "Revenue"])
+    df_top_prods["Share"] = (
+        (df_top_prods["Revenue"] / df_raw["Revenue"].sum() * 100).round(2)
+    )
+
+    top_name = df_top_prods.iloc[0]["Product"]
+    top_rev = df_top_prods.iloc[0]["Revenue"]
+    top_share = df_top_prods.iloc[0]["Share"]
+
+    col1, col2 = st.columns(2)
+    col1.metric("Top Selling Product", top_name)
+    col2.metric("5-Year Revenue", f"${top_rev:,.2f}", delta=f"{top_share}% of total")
+
+    # Format table for inspection
+    df_display = df_top_prods.copy()
+    df_display["Revenue"] = df_display["Revenue"].apply(lambda x: f"${x:,.2f}")
+    df_display["Share"] = df_display["Share"].apply(lambda x: f"{x:.2f}%")
+
+    st.markdown("##### Full Product Revenue Breakdown")
+    st.dataframe(df_display, use_container_width=True, hide_index=True)
 # ---------------------------------------------------------
 # Merge Audit Trail
 # ---------------------------------------------------------
