@@ -312,6 +312,87 @@ with st.expander("🏆 Additional Measure: Top Selling Product Audit"):
 
     st.markdown("##### Full Product Revenue Breakdown")
     st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------
+# Measure 3 Validation: Revenue by Year & YoY Growth
+# ---------------------------------------------------------
+with st.expander("📈 Revenue by Year & Annual Growth Analysis", expanded=True):
+  st.markdown("Annual revenue progression, growth rates, and validation metrics.")
+
+  # Group revenue by Year using analytics.group_total
+  year_res = analytics.group_total(df_raw, value_col="Revenue", group_col="Year")
+
+  if year_res.error:
+    st.error(f"Annual revenue error: {year_res.error}")
+  else:
+    # Build clean annual summary dataframe
+    df_years = pd.DataFrame(
+        list(year_res.value.items()), columns=["Year", "Revenue"]
+    )
+    df_years["Year"] = df_years["Year"].astype(int)
+    df_years = df_years.sort_values(by="Year").reset_index(drop=True)
+
+    # Compute analytical metrics: YoY Dollar Change, YoY % Growth, % Share of 5-Yr Total
+    df_years["YoY Change ($)"] = df_years["Revenue"].diff()
+    df_years["YoY Growth (%)"] = (df_years["Revenue"].pct_change() * 100).round(2)
+    total_5yr = df_years["Revenue"].sum()
+    df_years["Share of 5-Yr Total (%)"] = (
+        (df_years["Revenue"] / total_5yr) * 100
+    ).round(2)
+
+    # Visual Layout: Chart on left, Data Table on right
+    col_chart, col_table = st.columns([3, 2])
+
+    with col_chart:
+      fig_annual = px.bar(
+          df_years,
+          x="Year",
+          y="Revenue",
+          text="Revenue",
+          title="Annual Revenue Progression (2025–2029)",
+          color="Revenue",
+          color_continuous_scale="Blues",
+      )
+      fig_annual.update_traces(
+          texttemplate="$%{y:,.0f}",
+          textposition="outside",
+      )
+      fig_annual.update_layout(
+          yaxis_title="Total Revenue ($)",
+          xaxis_title="Calendar Year",
+          xaxis=dict(tickmode="linear", dtick=1),
+          showlegend=False,
+      )
+      st.plotly_chart(fig_annual, use_container_width=True)
+
+    with col_table:
+      st.markdown("##### Annual Financial Summary")
+
+      # Display formatted metrics
+      display_years = df_years.copy()
+      display_years["Revenue"] = display_years["Revenue"].apply(
+          lambda x: f"${x:,.2f}"
+      )
+      display_years["YoY Change ($)"] = display_years["YoY Change ($)"].apply(
+          lambda x: f"${x:,.2f}" if pd.notnull(x) else "—"
+      )
+      display_years["YoY Growth (%)"] = display_years["YoY Growth (%)"].apply(
+          lambda x: f"{x:+.2f}%" if pd.notnull(x) else "—"
+      )
+      display_years["Share of 5-Yr Total (%)"] = display_years[
+          "Share of 5-Yr Total (%)"
+      ].apply(lambda x: f"{x:.2f}%")
+
+      st.dataframe(display_years, use_container_width=True, hide_index=True)
+
+      # Key Executive Takeaway Callout
+      start_rev = df_years.iloc[0]["Revenue"]
+      end_rev = df_years.iloc[-1]["Revenue"]
+      cagr = ((end_rev / start_rev) ** (1 / (len(df_years) - 1)) - 1) * 100
+      st.caption(
+          f"💡 **Executive Takeaway:** Revenue expanded from ${start_rev:,.2f} (2025) "
+          f"to ${end_rev:,.2f} (2029), representing a 5-year CAGR of {cagr:.2f}%."
+      )
 # ---------------------------------------------------------
 # Merge Audit Trail
 # ---------------------------------------------------------
