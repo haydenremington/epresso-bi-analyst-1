@@ -26,7 +26,7 @@ def load_excel(path):
 # Safe data loader
 datasets = {}
 if os.path.exists(f"{DATA_DIR}/sales.csv"):
-  datasets["Sales Fact"] = load_csv(f"{DATA_DIR}/sales.csv")
+  datasets["Sales Fact"] = load_csv(f"{DATA_DIR}/sales1.csv")
 if os.path.exists(f"{DATA_DIR}/products.csv"):
   datasets["Products Dim"] = load_csv(f"{DATA_DIR}/products.csv")
 if os.path.exists(f"{DATA_DIR}/stores.csv"):
