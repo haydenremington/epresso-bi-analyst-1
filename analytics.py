@@ -164,7 +164,13 @@ def _find_matching_key(
   """Finds the matching key column between two dataframes regardless of casing or delimiters."""
 
   def normalize(s: str) -> str:
-    return s.lower().replace(" ", "").replace("_", "").replace("-", "")
+      return (
+          s.lower()
+          .replace("\ufeff", "")
+          .replace(" ", "")
+          .replace("_", "")
+          .replace("-", "")
+      )
 
   map1 = {normalize(c): c for c in df1.columns}
   map2 = {normalize(c): c for c in df2.columns}
@@ -186,9 +192,9 @@ def prepare_epresso_data(
   """
   reports = []
 
-  # Clean whitespace across all string columns
-  for df in (df_sales, df_products, df_stores):
-    df.columns = [c.strip() for c in df.columns]
+  # Clean BOM (\ufeff), whitespace, and hidden quotes across all table column names
+    for df in (df_sales, df_products, df_stores):
+      df.columns = [c.strip().lstrip("\ufeff") for c in df.columns]
 
   # 1. Date parsing: extract Year and Month
   date_col = next((c for c in df_sales.columns if c.lower() == "date"), None)
