@@ -342,8 +342,3 @@ def prepare_epresso_data(
 
   return final_df, reports
 
-# Group by Month (1-12) to see the seasonality curve across all years
-df_raw["Month_Num"] = df_raw["Date"].dt.month
-monthly_pattern = analytics.group_total(
-    df_raw, value_col="Revenue", group_col="Month_Num"
-)
