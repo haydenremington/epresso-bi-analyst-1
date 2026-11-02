@@ -1,6 +1,7 @@
 import os
 import analytics
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
 st.set_page_config(
@@ -8,13 +9,13 @@ st.set_page_config(
 )
 
 st.title("☕ E-Presso Executive Intelligence Dashboard")
-st.caption("Checkpoint 2: Revenue Reconciliation & Core Analytics")
+st.caption("Checkpoint 2: Validated Analytics & Interactive Visualizations")
 
 DATA_DIR = "data"
 
 
 # ---------------------------------------------------------
-# Dynamic File Ingestion (Tied to byte buffers for caching)
+# Dynamic File Ingestion
 # ---------------------------------------------------------
 @st.cache_data
 def load_all_tables(sales_bytes, products_bytes, stores_bytes):
@@ -24,7 +25,7 @@ def load_all_tables(sales_bytes, products_bytes, stores_bytes):
   return analytics.prepare_epresso_data(sales_df, products_df, stores_df)
 
 
-# Sidebar Uploader (Supports $1,000 modified-data test)
+# Sidebar: Data Source Management
 st.sidebar.header("📁 Data Source Management")
 sales_upload = st.sidebar.file_uploader(
     "Upload Sales (CSV)", type=["csv", "txt"]
@@ -36,7 +37,6 @@ stores_upload = st.sidebar.file_uploader(
     "Upload Stores (CSV)", type=["csv", "txt"]
 )
 
-# Resolve file sources (uploaded files take precedence over default files in data/)
 sales_bytes = (
     sales_upload.getvalue()
     if sales_upload
@@ -54,46 +54,165 @@ stores_bytes = (
 )
 
 try:
-  df, merge_audits = load_all_tables(sales_bytes, products_bytes, stores_bytes)
+  df_raw, merge_audits = load_all_tables(
+      sales_bytes, products_bytes, stores_bytes
+  )
 except Exception as e:
-  st.error(f"Error loading or preparing datasets: {e}")
+  st.error(f"Error loading datasets: {e}")
   st.stop()
 
 # ---------------------------------------------------------
-# Calculate Total Revenue using analytics.get_total()
+# Sidebar: Dynamic Interactive Filters (Built from data)
 # ---------------------------------------------------------
-rev_col = next((c for c in df.columns if c.lower() == "revenue"), "Revenue")
-total_result = analytics.get_total(df, value_col=rev_col)
+st.sidebar.header("🎯 Dashboard Filters")
+
+# 1. Year Filter
+year_col = "Year" if "Year" in df_raw.columns else None
+years = (
+    ["All"] + sorted(df_raw[year_col].dropna().unique().tolist())
+    if year_col
+    else ["All"]
+)
+selected_year = st.sidebar.selectbox("Filter by Year", years)
+
+# 2. Sales Channel Filter
+channel_col = next(
+    (
+        c
+        for c in df_raw.columns
+        if c.lower() in ["channel", "storetype", "location"]
+    ),
+    None,
+)
+channels = (
+    ["All"] + sorted(df_raw[channel_col].dropna().unique().tolist())
+    if channel_col
+    else ["All"]
+)
+selected_channel = st.sidebar.selectbox("Filter by Sales Channel", channels)
+
+# 3. Store / City Filter
+city_col = next(
+    (c for c in df_raw.columns if c.lower() in ["city", "store", "store_name"]),
+    None,
+)
+cities = (
+    ["All"] + sorted(df_raw[city_col].dropna().unique().tolist())
+    if city_col
+    else ["All"]
+)
+selected_city = st.sidebar.selectbox("Filter by Store Location", cities)
+
+# Apply filters dynamically
+active_filters = {}
+if selected_year != "All" and year_col:
+  active_filters[year_col] = selected_year
+if selected_channel != "All" and channel_col:
+  active_filters[channel_col] = selected_channel
+if selected_city != "All" and city_col:
+  active_filters[city_col] = selected_city
+
+filtered_df, filter_err = analytics._apply_filters(df_raw, active_filters)
+if filter_err:
+  st.error(filter_err)
+  st.stop()
 
 # ---------------------------------------------------------
-# Executive KPI Display
+# Dynamic KPI Display
 # ---------------------------------------------------------
-if total_result.error:
-  st.error(f"Calculation Error: {total_result.error}")
-else:
-  col1, col2, col3 = st.columns(3)
-  col1.metric("Calculated Total Revenue", f"${total_result.value:,.2f}")
-  col2.metric("Total Line Items Analyzed", f"{total_result.rows_used:,}")
-  col3.metric("Duplicate Rows", f"{df.duplicated().sum():,}")
+rev_col = next(
+    (c for c in filtered_df.columns if c.lower() == "revenue"), "Revenue"
+)
+kpi_total = analytics.get_total(
+    df_raw, value_col=rev_col, filters=active_filters
+)
 
-  if total_result.caveats:
-    for caveat in total_result.caveats:
-      st.caption(f"⚠️ {caveat}")
+col1, col2, col3 = st.columns(3)
+col1.metric("Selected Revenue", f"${kpi_total.value:,.2f}")
+col2.metric("Line Items in Scope", f"{kpi_total.rows_used:,}")
+col3.metric(
+    "Share of Total Revenue",
+    f"{(kpi_total.value / df_raw[rev_col].sum() * 100):.2f}%",
+)
+
+if kpi_total.caveats:
+  for caveat in kpi_total.caveats:
+    st.caption(f"⚠️ {caveat}")
 
 st.divider()
 
 # ---------------------------------------------------------
-# Merge Audit Trail (Course Requirement)
+# Required Visualizations (3 Charts)
 # ---------------------------------------------------------
-st.subheader("🔍 Merge Integrity Audit")
-audit_df = pd.DataFrame(merge_audits)
-st.dataframe(audit_df, use_container_width=True)
+chart_row1_col1, chart_row1_col2 = st.columns(2)
 
-# Visual alert if fan-out occurred
-if any(a.get("changed", False) for a in merge_audits):
-  st.error(
-      "⚠️ Warning: A join changed row counts or revenue totals! Investigate"
-      " keys and grain."
+# Chart 1: Revenue by Sales Channel
+with chart_row1_col1:
+  st.subheader("1. Revenue by Channel")
+  if channel_col:
+    channel_summary = (
+        filtered_df.groupby(channel_col, as_index=False)[rev_col]
+        .sum()
+        .sort_values(by=rev_col, ascending=False)
+    )
+    fig_channel = px.pie(
+        channel_summary,
+        names=channel_col,
+        values=rev_col,
+        hole=0.4,
+        color_discrete_sequence=px.colors.qualitative.Safe,
+    )
+    fig_channel.update_traces(textposition="inside", textinfo="percent+label")
+    st.plotly_chart(fig_channel, use_container_width=True)
+  else:
+    st.info("Channel column not found.")
+
+# Chart 2: Revenue Trend by Year
+with chart_row1_col2:
+  st.subheader("2. Annual Revenue Progression")
+  if year_col:
+    year_summary = (
+        filtered_df.groupby(year_col, as_index=False)[rev_col]
+        .sum()
+        .sort_values(by=year_col)
+    )
+    fig_year = px.line(
+        year_summary,
+        x=year_col,
+        y=rev_col,
+        markers=True,
+        labels={rev_col: "Revenue ($)", year_col: "Year"},
+    )
+    fig_year.update_layout(xaxis=dict(tickmode="linear"))
+    st.plotly_chart(fig_year, use_container_width=True)
+  else:
+    st.info("Year column not found.")
+
+# Chart 3: Revenue by Store City / Location
+st.subheader("3. Revenue by Location")
+if city_col:
+  city_summary = (
+      filtered_df.groupby(city_col, as_index=False)[rev_col]
+      .sum()
+      .sort_values(by=rev_col, ascending=True)
   )
+  fig_city = px.bar(
+      city_summary,
+      x=rev_col,
+      y=city_col,
+      orientation="h",
+      labels={rev_col: "Revenue ($)", city_col: "Location"},
+      color=rev_col,
+      color_continuous_scale="Teal",
+  )
+  st.plotly_chart(fig_city, use_container_width=True)
 else:
-  st.success("✅ Clean joins confirmed: No row duplication or dropped revenue.")
+  st.info("Location/City column not found.")
+
+st.divider()
+
+# ---------------------------------------------------------
+# Merge Audit Trail
+# ---------------------------------------------------------
+with st.expander("🔍 View Data Ingestion & Merge Audit"):
+  st.dataframe(pd.DataFrame(merge_audits), use_container_width=True)
