@@ -398,3 +398,86 @@ with st.expander("📈 Revenue by Year & Annual Growth Analysis", expanded=True)
 # ---------------------------------------------------------
 with st.expander("🔍 View Data Ingestion & Merge Audit"):
   st.dataframe(pd.DataFrame(merge_audits), use_container_width=True)
+
+import agent  # Ensure agent.py is imported at the top of streamlit_app.py
+
+# ---------------------------------------------------------
+# Conversational Analytical Assistant (Stage 3 Interface)
+# ---------------------------------------------------------
+st.divider()
+st.subheader("💬 E-Presso Analytical Assistant")
+st.caption(
+    "Query the active dataset using approved analytical functions and inspect"
+    " live tool execution logs."
+)
+
+# 1. Initialize conversational state and query counters
+MAX_SESSION_QUERIES = 15
+
+if "messages" not in st.session_state:
+  st.session_state.messages = []
+
+if "query_count" not in st.session_state:
+  st.session_state.query_count = 0
+
+# Sidebar query counter tracker
+st.sidebar.markdown("---")
+st.sidebar.subheader("🤖 Assistant Session Status")
+st.sidebar.write(
+    f"Queries Used: **{st.session_state.query_count} / {MAX_SESSION_QUERIES}**"
+)
+
+# 2. Render conversation history
+for msg in st.session_state.messages:
+  with st.chat_message(msg["role"]):
+    st.markdown(msg["content"])
+    if "call_log" in msg and msg["call_log"]:
+      with st.expander("🛠️ Tool-Call Execution Log"):
+        st.write(f"**Tool Invoked:** `{msg['call_log'].get('tool_name')}`")
+        st.write(f"**Arguments:** `{msg['call_log'].get('arguments')}`")
+        st.write(f"**Status:** `{msg['call_log'].get('status')}`")
+        st.json(msg["call_log"].get("raw_result"))
+
+# 3. Handle new incoming user questions
+if prompt := st.chat_input(
+    "Ask a business question (e.g., 'What was total revenue?', 'Compare"
+    " sales channels')..."
+):
+  # Check per-session query guardrail
+  if st.session_state.query_count >= MAX_SESSION_QUERIES:
+    st.warning(
+        f"⚠️ Session limit reached ({MAX_SESSION_QUERIES} queries). Please"
+        " refresh the browser page to start a new analytical session."
+    )
+  else:
+    # Increment query counter
+    st.session_state.query_count += 1
+
+    # Append user question
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+      st.markdown(prompt)
+
+    # Route question through dispatcher using currently loaded dataset
+    with st.chat_message("assistant"):
+      with st.spinner("Analyzing active business data..."):
+        # Executes the rules-based router baseline
+        answer, call_log, mode = agent.rules_based_router(prompt, df_raw)
+
+        # Render structured response
+        st.markdown(answer)
+
+        # Render visible tool-call log (Mandatory rubric requirement)
+        with st.expander("🛠️ Tool-Call Execution Log", expanded=True):
+          st.write(f"**Execution Mode:** `{mode}`")
+          st.write(f"**Tool Invoked:** `{call_log.get('tool_name')}`")
+          st.write(f"**Arguments:** `{call_log.get('arguments')}`")
+          st.write(f"**Status:** `{call_log.get('status')}`")
+          st.json(call_log.get("raw_result"))
+
+    # Save assistant response to session history
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": answer,
+        "call_log": call_log,
+    })
