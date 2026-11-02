@@ -244,36 +244,40 @@ def prepare_epresso_data(
   reports.append(report_1)
 
   # 3. Match and merge Stores Dim
-  sales_store_key, store_key = _find_matching_key(
-      merged_1, df_stores, ["Store ID", "StoreID", "Store_ID", "Store"]
-  )
-
-  if not sales_store_key or not store_key:
-    raise KeyError(
-        "Could not find matching Store key. Sales columns:"
-        f" {list(merged_1.columns)}, Stores columns:"
-        f" {list(df_stores.columns)}"
+    sales_store_key, store_key = _find_matching_key(
+        merged_1, df_stores, ['Store ID', 'StoreID', 'Store_ID', 'Store']
     )
 
-  merged_1[sales_store_key] = (
-      merged_1[sales_store_key].astype(str).str.strip()
-  )
-  df_stores[store_key] = df_stores[store_key].astype(str).str.strip()
+    # Fallback: Stores dim often names its primary key simply 'ID'
+    if not store_key and "ID" in df_stores.columns:
+      sales_store_key = "Store ID"
+      store_key = "ID"
 
-  if sales_store_key != store_key:
-    df_stores = df_stores.rename(columns={store_key: sales_store_key})
-    store_key = sales_store_key
+    if not sales_store_key or not store_key:
+      raise KeyError(
+          "Could not find matching Store key. Sales columns:"
+          f" {list(merged_1.columns)}, Stores columns: {list(df_stores.columns)}"
+      )
 
-  final_df, report_2 = check_merge(
-      left=merged_1,
-      right=df_stores,
-      on=sales_store_key,
-      value_col=rev_col,
-      how="left",
-  )
-  report_2["step"] = (
-      f"Sales/Products + Stores Dim (on {sales_store_key} -> {store_key})"
-  )
-  reports.append(report_2)
+    merged_1[sales_store_key] = (
+        merged_1[sales_store_key].astype(str).str.strip()
+    )
+    df_stores[store_key] = df_stores[store_key].astype(str).str.strip()
+
+    if sales_store_key != store_key:
+      df_stores = df_stores.rename(columns={store_key: sales_store_key})
+      store_key = sales_store_key
+
+    final_df, report_2 = check_merge(
+        left=merged_1,
+        right=df_stores,
+        on=sales_store_key,
+        value_col=rev_col,
+        how="left",
+    )
+    report_2["step"] = (
+        f"Sales/Products + Stores Dim (on {sales_store_key} -> {store_key})"
+    )
+    reports.append(report_2)
 
   return final_df, reports
