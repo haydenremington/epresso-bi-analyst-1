@@ -3,6 +3,7 @@ import analytics
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import agent 
 
 st.set_page_config(
     page_title="E-Presso BI Dashboard", page_icon="☕", layout="wide"
@@ -411,7 +412,16 @@ st.caption(
     " live tool execution logs."
 )
 
-# 1. Initialize conversational state and query counters
+# Execution mode toggle in sidebar
+st.sidebar.markdown("---")
+st.sidebar.subheader("⚙️ Assistant Mode")
+assistant_mode = st.sidebar.radio(
+    "Select Routing Engine:",
+    ("LLM (Gemini Function Calling)", "Rules-Based (Baseline)"),
+)
+
+api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+
 MAX_SESSION_QUERIES = 15
 
 if "messages" not in st.session_state:
@@ -420,54 +430,62 @@ if "messages" not in st.session_state:
 if "query_count" not in st.session_state:
   st.session_state.query_count = 0
 
-# Sidebar query counter tracker
-st.sidebar.markdown("---")
-st.sidebar.subheader("🤖 Assistant Session Status")
 st.sidebar.write(
     f"Queries Used: **{st.session_state.query_count} / {MAX_SESSION_QUERIES}**"
 )
 
-# 2. Render conversation history
+# Render conversation history
 for msg in st.session_state.messages:
   with st.chat_message(msg["role"]):
     st.markdown(msg["content"])
     if "call_log" in msg and msg["call_log"]:
       with st.expander("🛠️ Tool-Call Execution Log"):
+        st.write(f"**Execution Mode:** `{msg.get('mode', 'N/A')}`")
         st.write(f"**Tool Invoked:** `{msg['call_log'].get('tool_name')}`")
         st.write(f"**Arguments:** `{msg['call_log'].get('arguments')}`")
         st.write(f"**Status:** `{msg['call_log'].get('status')}`")
         st.json(msg["call_log"].get("raw_result"))
 
-# 3. Handle new incoming user questions
+# Handle incoming chat questions
 if prompt := st.chat_input(
-    "Ask a business question (e.g., 'What was total revenue?', 'Compare"
-    " sales channels')..."
+    "Ask a business question (e.g., 'What was our total revenue across all"
+    " years?')..."
 ):
-  # Check per-session query guardrail
   if st.session_state.query_count >= MAX_SESSION_QUERIES:
     st.warning(
         f"⚠️ Session limit reached ({MAX_SESSION_QUERIES} queries). Please"
-        " refresh the browser page to start a new analytical session."
+        " refresh the page to start a new session."
     )
   else:
-    # Increment query counter
     st.session_state.query_count += 1
-
-    # Append user question
     st.session_state.messages.append({"role": "user", "content": prompt})
+
     with st.chat_message("user"):
       st.markdown(prompt)
 
-    # Route question through dispatcher using currently loaded dataset
     with st.chat_message("assistant"):
-      with st.spinner("Analyzing active business data..."):
-        # Executes the rules-based router baseline
-        answer, call_log, mode = agent.rules_based_router(prompt, df_raw)
+      with st.spinner("Analyzing dataset with approved tools..."):
+        if assistant_mode == "LLM (Gemini Function Calling)":
+          if not api_key:
+            answer = (
+                "⚠️ **API Key Missing**: `GEMINI_API_KEY` was not found in"
+                " `st.secrets`. Switch to **Rules-Based (Baseline)** in the"
+                " sidebar or configure your secret key."
+            )
+            call_log = {
+                "tool_name": "none",
+                "arguments": {},
+                "raw_result": {"error": "Missing API key"},
+                "status": "config_error",
+            }
+            mode = "Configuration Alert"
+          else:
+            answer, call_log, mode = agent.llm_router(prompt, df_raw, api_key)
+        else:
+          answer, call_log, mode = agent.rules_based_router(prompt, df_raw)
 
-        # Render structured response
         st.markdown(answer)
 
-        # Render visible tool-call log (Mandatory rubric requirement)
         with st.expander("🛠️ Tool-Call Execution Log", expanded=True):
           st.write(f"**Execution Mode:** `{mode}`")
           st.write(f"**Tool Invoked:** `{call_log.get('tool_name')}`")
@@ -475,9 +493,9 @@ if prompt := st.chat_input(
           st.write(f"**Status:** `{call_log.get('status')}`")
           st.json(call_log.get("raw_result"))
 
-    # Save assistant response to session history
     st.session_state.messages.append({
         "role": "assistant",
         "content": answer,
         "call_log": call_log,
+        "mode": mode,
     })
