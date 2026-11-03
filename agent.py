@@ -307,6 +307,8 @@ def llm_router(query: str, df, api_key: str) -> tuple[str, dict, str]:
     executes the chosen tool through dispatch_tool, and feeds the output back for
     narration.
     """
+    import json
+
     client = genai.Client(api_key=api_key)
     tool = types.Tool(function_declarations=TOOL_SCHEMAS)
 
@@ -325,7 +327,6 @@ def llm_router(query: str, df, api_key: str) -> tuple[str, dict, str]:
             )
         except Exception as err:
             if "503" in str(err) or "404" in str(err):
-                # Fall back to secondary model if primary is under high demand
                 response, active_model = _generate_with_retry(
                     client,
                     FALLBACK_MODEL,
@@ -356,16 +357,13 @@ def llm_router(query: str, df, api_key: str) -> tuple[str, dict, str]:
 
         call_log = dispatch_tool(tool_name, tool_args, df)
 
-        # 3. Feed tool response back to model for final narration
-        # Note: role must be 'user' for function response payloads in google.genai
-        tool_result_content = types.Content(
-            role="user",
-            parts=[
-                types.Part.from_function_response(
-                    name=tool_name,
-                    response={"result": call_log["raw_result"]},
-                )
-            ],
+        # 3. Feed tool response back to model as clean text payload (avoids SDK role conflicts)
+        tool_payload_str = json.dumps(call_log["raw_result"], indent=2)
+        narration_prompt = (
+            f"User Question: {query}\n\n"
+            f"Executed Tool: {tool_name}\n"
+            f"Raw Tool Result Payload:\n{tool_payload_str}\n\n"
+            "Format the response using the required Markdown sections (Findings, Interpretation, Caveats & Limitations, Next Steps)."
         )
 
         narration, _ = _generate_with_retry(
@@ -373,10 +371,9 @@ def llm_router(query: str, df, api_key: str) -> tuple[str, dict, str]:
             active_model,
             contents=[
                 types.Content(
-                    role="user", parts=[types.Part.from_text(text=query)]
-                ),
-                response.candidates[0].content,
-                tool_result_content,
+                    role="user",
+                    parts=[types.Part.from_text(text=narration_prompt)],
+                )
             ],
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
