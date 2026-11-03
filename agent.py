@@ -213,20 +213,33 @@ def rules_based_router(query: str, df) -> tuple[str, dict, str]:
 # ---------------------------------------------------------
 TOOL_SCHEMAS = [
     types.FunctionDeclaration(
-        name="get_total",
+        name="group_total",
         description=(
-            "Calculates the total sum of a numeric column (such as 'Revenue')"
-            " across the entire table or within a filtered scope."
+            "Calculates the sum of a numeric column grouped by an exact dataset"
+            " column. For channel comparisons, use 'StoreType' (which contains"
+            " 'Brick-and-mortar' vs 'Website'). Other valid group columns"
+            " include 'Year', 'Product', 'State', and 'City'."
         ),
         parameters=types.Schema(
             type="OBJECT",
             properties={
                 "value_col": types.Schema(
                     type="STRING",
-                    description="The numeric column to sum. Defaults to 'Revenue'.",
+                    description=(
+                        "The numeric column to sum (e.g., 'Revenue',"
+                        " 'Quantity')."
+                    ),
+                ),
+                "group_col": types.Schema(
+                    type="STRING",
+                    description=(
+                        "The exact column name to group by. Available columns:"
+                        " 'StoreType' (use this for sales channels), 'Year',"
+                        " 'Product', 'City', 'State'."
+                    ),
                 ),
             },
-            required=["value_col"],
+            required=["value_col", "group_col"],
         ),
     ),
     types.FunctionDeclaration(
