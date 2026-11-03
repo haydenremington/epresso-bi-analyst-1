@@ -6,6 +6,7 @@ import os
 import analytics
 from google import genai
 from google.genai import types
+import time 
 
 # ---------------------------------------------------------
 # Master Registry of Approved Tools
@@ -284,8 +285,27 @@ Provide concrete operational or strategic follow-ups based on the data.
 """
 
 
+# Primary and fallback model endpoints
+PRIMARY_MODEL = "gemini-3.8-flash"
+FALLBACK_MODEL = "gemini-2.5-flash"
+
+
+def _generate_with_retry(client, model_name: str, **kwargs):
+  """Attempts generation with a short retry on 503 high demand before falling back."""
+  for attempt in range(2):
+    try:
+      return client.models.generate_content(
+          model=model_name, **kwargs
+      ), model_name
+    except Exception as e:
+      if "503" in str(e) and attempt == 0:
+        time.sleep(1.5)  # Brief pause on temporary spike
+        continue
+      raise e
+
+
 def llm_router(query: str, df, api_key: str) -> tuple[str, dict, str]:
-  """Routes user queries through Gemini using tool-calling declarations,
+  """Routes user queries through Gemini using tool declarations,
 
   executes the chosen tool through dispatch_tool, and feeds the output back for
   narration.
@@ -294,15 +314,33 @@ def llm_router(query: str, df, api_key: str) -> tuple[str, dict, str]:
   tool = types.Tool(function_declarations=TOOL_SCHEMAS)
 
   try:
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=query,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            tools=[tool],
-            temperature=0.1,
-        ),
-    )
+    # 1. First model call: determine tool use
+    try:
+      response, active_model = _generate_with_retry(
+          client,
+          PRIMARY_MODEL,
+          contents=query,
+          config=types.GenerateContentConfig(
+              system_instruction=SYSTEM_PROMPT,
+              tools=[tool],
+              temperature=0.1,
+          ),
+      )
+    except Exception as err:
+      if "503" in str(err) or "404" in str(err):
+        # Fall back to secondary model if primary is under high demand
+        response, active_model = _generate_with_retry(
+            client,
+            FALLBACK_MODEL,
+            contents=query,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                tools=[tool],
+                temperature=0.1,
+            ),
+        )
+      else:
+        raise err
 
     function_calls = response.function_calls
     if not function_calls:
@@ -312,14 +350,16 @@ def llm_router(query: str, df, api_key: str) -> tuple[str, dict, str]:
           "raw_result": {"message": "Direct refusal or clarification."},
           "status": "unsupported",
       }
-      return response.text, fallback_log, "LLM Direct"
+      return response.text, fallback_log, f"LLM Direct ({active_model})"
 
+    # 2. Execute local function via dispatcher
     call = function_calls[0]
     tool_name = call.name
     tool_args = dict(call.args) if call.args else {}
 
     call_log = dispatch_tool(tool_name, tool_args, df)
 
+    # 3. Feed tool response back to model for final narration
     tool_result_content = types.Content(
         role="tool",
         parts=[
@@ -330,8 +370,9 @@ def llm_router(query: str, df, api_key: str) -> tuple[str, dict, str]:
         ],
     )
 
-    narration = client.models.generate_content(
-        model="gemini-3.8-flash",
+    narration, _ = _generate_with_retry(
+        client,
+        active_model,
         contents=[
             types.Content(
                 role="user", parts=[types.Part.from_text(text=query)]
@@ -345,7 +386,7 @@ def llm_router(query: str, df, api_key: str) -> tuple[str, dict, str]:
         ),
     )
 
-    return narration.text, call_log, "LLM Function Call"
+    return narration.text, call_log, f"LLM Function Call ({active_model})"
 
   except Exception as e:
     err_log = {
