@@ -287,7 +287,7 @@ Provide concrete operational or strategic follow-ups based on the data.
 
 # Primary and fallback model endpoints
 PRIMARY_MODEL = "gemini-3.8-flash"
-FALLBACK_MODEL = "gemini-2.5-flash"
+FALLBACK_MODEL = "gemini-3.6-flash"
 
 
 def _generate_with_retry(client, model_name: str, **kwargs):
