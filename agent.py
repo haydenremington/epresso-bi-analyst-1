@@ -213,6 +213,25 @@ def rules_based_router(query: str, df) -> tuple[str, dict, str]:
 # ---------------------------------------------------------
 TOOL_SCHEMAS = [
     types.FunctionDeclaration(
+        name="get_total",
+        description=(
+            "Calculates the total sum of a numeric column (such as 'Revenue') "
+            "across the entire table or within a filtered scope."
+        ),
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "value_col": types.Schema(
+                    type="STRING",
+                    description=(
+                        "The numeric column to sum. Defaults to 'Revenue'."
+                    ),
+                ),
+            },
+            required=["value_col"],
+        ),
+    ),
+    types.FunctionDeclaration(
         name="group_total",
         description=(
             "Calculates the sum of a numeric column grouped by an exact dataset"
@@ -237,27 +256,6 @@ TOOL_SCHEMAS = [
                         " 'StoreType' (use this for sales channels), 'Year',"
                         " 'Product', 'City', 'State'."
                     ),
-                ),
-            },
-            required=["value_col", "group_col"],
-        ),
-    ),
-    types.FunctionDeclaration(
-        name="group_total",
-        description=(
-            "Calculates the sum of a numeric column grouped by a dimension"
-            " column (e.g. 'Year', 'StoreType', 'Product')."
-        ),
-        parameters=types.Schema(
-            type="OBJECT",
-            properties={
-                "value_col": types.Schema(
-                    type="STRING",
-                    description="The numeric column to sum (e.g. 'Revenue').",
-                ),
-                "group_col": types.Schema(
-                    type="STRING",
-                    description="The column to group by (e.g. 'Year', 'StoreType', 'Product').",
                 ),
             },
             required=["value_col", "group_col"],
