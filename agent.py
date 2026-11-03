@@ -295,7 +295,7 @@ def llm_router(query: str, df, api_key: str) -> tuple[str, dict, str]:
 
   try:
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=query,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
@@ -331,9 +331,11 @@ def llm_router(query: str, df, api_key: str) -> tuple[str, dict, str]:
     )
 
     narration = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=[
-            types.Content(role="user", parts=[types.Part.from_text(text=query)]),
+            types.Content(
+                role="user", parts=[types.Part.from_text(text=query)]
+            ),
             response.candidates[0].content,
             tool_result_content,
         ],
